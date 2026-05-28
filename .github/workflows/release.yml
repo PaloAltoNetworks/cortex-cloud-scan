@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate action.yml
+        run: |
+          # Ensure action.yml is valid
+          if [ ! -f action.yml ]; then
+            echo "Error: action.yml not found"
+            exit 1
+          fi
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Create Release Notes
+        id: release_notes
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## Cortex Cloud Scan v${{ steps.version.outputs.version }}
+
+          GitHub Action for Cortex Cloud security scanning.
+
+          ### Supported Scan Types
+          - **Code Security**: Secrets, IaC, SCA
+          - **Container Workload Protection**: Image vulnerabilities and malware
+          - **API Security**: API vulnerability testing
+
+          ### Installation
+          ```yaml
+          - uses: PaloAltoNetworks/cortex-cloud-scan@v${{ steps.version.outputs.version }}
+            with:
+              scan-type: code
+              api-base-url: ${{ secrets.CORTEX_API_BASE_URL }}
+              api-key: ${{ secrets.CORTEX_API_KEY }}
+              api-key-id: ${{ secrets.CORTEX_API_KEY_ID }}
+              directory: .
+          ```
+
+          ### Documentation
+          - [README](README.md)
+          - [Quick Start Guide](QUICKSTART.md)
+          - [Examples](examples/)
+
+          ### Full Changelog
+          See [CHANGELOG.md](CHANGELOG.md) for details.
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+          files: |
+            action.yml
+            README.md
+            QUICKSTART.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update major version tag
+        run: |
+          # Extract major version (v1.2.3 -> v1)
+          MAJOR_VERSION=$(echo ${{ github.ref_name }} | sed -E 's/^v([0-9]+)\..*/v\1/')
+
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+
+          # Move the major version tag
+          git tag -fa $MAJOR_VERSION -m "Update $MAJOR_VERSION to ${{ github.ref_name }}"
+          git push origin $MAJOR_VERSION --force

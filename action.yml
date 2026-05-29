@@ -1,0 +1,475 @@
+name: 'Cortex Cloud Scan'
+description: 'Run Cortex Cloud security scans for Code Security, Container Workload Protection, and API Security'
+author: 'Palo Alto Networks'
+
+branding:
+  icon: 'shield'
+  color: 'orange'
+
+inputs:
+  # Authentication (Required for all modules)
+  api-base-url:
+    description: 'Cortex Cloud API base URL'
+    required: true
+  api-key:
+    description: 'Cortex Cloud API key'
+    required: true
+  api-key-id:
+    description: 'Cortex Cloud API key ID'
+    required: true
+
+  # Module Selection (Required)
+  scan-type:
+    description: 'Type of scan to perform: code, image, or api'
+    required: true
+
+  # Code Security Options
+  directory:
+    description: '[Code] Directory path to scan'
+    required: false
+  file:
+    description: '[Code] File path to scan'
+    required: false
+  repo-id:
+    description: '[Code] Repository ID (format: owner/repo)'
+    required: false
+  branch:
+    description: '[Code] Branch name'
+    required: false
+  upload-mode:
+    description: '[Code] Upload mode: upload, no-upload, or no-code'
+    required: false
+    default: 'upload'
+  framework:
+    description: '[Code] Frameworks to scan (comma-separated)'
+    required: false
+  skip-framework:
+    description: '[Code] Frameworks to skip (comma-separated)'
+    required: false
+  severity:
+    description: '[Code] Filter by severity levels (comma-separated: critical,high,medium,low,unknown)'
+    required: false
+  output-format:
+    description: '[Code] Output format: cli, json, spdx, junitxml, sarif, cyclonedx, cyclonedx_json'
+    required: false
+    default: 'cli'
+  output-file-path:
+    description: '[Code] Path for output file'
+    required: false
+  soft-fail:
+    description: '[Code/Image] Do not fail pipeline on findings (true/false)'
+    required: false
+    default: 'false'
+  no-fail-on-crash:
+    description: '[Code/Image] Return exit code 0 on internal errors (true/false)'
+    required: false
+    default: 'false'
+  compact:
+    description: '[Code] Do not display code blocks in output (true/false)'
+    required: false
+    default: 'false'
+  skip-path:
+    description: '[Code] Path to skip during scan'
+    required: false
+  create-repo-if-missing:
+    description: '[Code] Create repository if missing (true/false)'
+    required: false
+    default: 'false'
+  validate-secrets:
+    description: '[Code] Validate detected secrets (true/false)'
+    required: false
+    default: 'false'
+
+  # Container Workload Protection Options
+  image:
+    description: '[Image] Container image name to scan'
+    required: false
+  archive:
+    description: '[Image] Scan from archive file (true/false)'
+    required: false
+    default: 'false'
+  archive-format:
+    description: '[Image] Archive format: docker-archive or oci-archive'
+    required: false
+    default: 'docker-archive'
+  docker-host:
+    description: '[Image] Path to Docker socket'
+    required: false
+  ci-pipeline-id:
+    description: '[Image] CI pipeline identifier'
+    required: false
+  ci-build-id:
+    description: '[Image] CI build identifier'
+    required: false
+  image-timeout:
+    description: '[Image] Timeout in seconds'
+    required: false
+    default: '60'
+  image-output-format:
+    description: '[Image] Output format: human-readable or json'
+    required: false
+    default: 'human-readable'
+
+  # API Security Options
+  scanned-app-url:
+    description: '[API] Base URL of the application to scan'
+    required: false
+  api-spec-file:
+    description: '[API] Path to API specification file'
+    required: false
+  api-spec-type:
+    description: '[API] API specification type'
+    required: false
+    default: 'openapi'
+  auth-file:
+    description: '[API] Path to authentication file'
+    required: false
+  java-location:
+    description: '[API] Path to Java binary (version >= 11)'
+    required: false
+    default: 'java'
+  api-timeout:
+    description: '[API] Scan timeout in seconds'
+    required: false
+    default: '300'
+  concurrency:
+    description: '[API] Concurrency limit for scan requests'
+    required: false
+    default: '5'
+  api-output-file:
+    description: '[API] Output path for report file'
+    required: false
+
+  # Common Options
+  ca-certificate:
+    description: 'Path to CA certificate for proxy/TLS inspection'
+    required: false
+  no-cert-verify:
+    description: 'Disable TLS certificate verification (true/false)'
+    required: false
+    default: 'false'
+  http-proxy:
+    description: 'HTTP proxy server URL'
+    required: false
+  log-level:
+    description: 'Logging level: INFO, WARNING, ERROR'
+    required: false
+  support:
+    description: 'Generate support bundle with detailed logs (true/false)'
+    required: false
+    default: 'false'
+
+outputs:
+  scan-result:
+    description: 'Path to scan result file (if output file was specified)'
+    value: ${{ steps.scan.outputs.result-file }}
+  exit-code:
+    description: 'Exit code from the scan'
+    value: ${{ steps.scan.outputs.exit-code }}
+  support-bundle:
+    description: 'Path to support bundle file (if support was enabled)'
+    value: ${{ steps.scan.outputs.support-bundle }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        if [[ "${{ inputs.scan-type }}" != "code" && "${{ inputs.scan-type }}" != "image" && "${{ inputs.scan-type }}" != "api" ]]; then
+          echo "Error: scan-type must be one of: code, image, api"
+          exit 1
+        fi
+
+        # Validate code scan inputs
+        if [[ "${{ inputs.scan-type }}" == "code" ]]; then
+          if [[ -z "${{ inputs.directory }}" && -z "${{ inputs.file }}" ]]; then
+            echo "Error: For code scans, either 'directory' or 'file' input is required"
+            exit 1
+          fi
+        fi
+
+        # Validate image scan inputs
+        if [[ "${{ inputs.scan-type }}" == "image" ]]; then
+          if [[ -z "${{ inputs.image }}" ]]; then
+            echo "Error: For image scans, 'image' input is required"
+            exit 1
+          fi
+        fi
+
+        # Validate API scan inputs
+        if [[ "${{ inputs.scan-type }}" == "api" ]]; then
+          if [[ -z "${{ inputs.scanned-app-url }}" || -z "${{ inputs.api-spec-file }}" ]]; then
+            echo "Error: For API scans, both 'scanned-app-url' and 'api-spec-file' inputs are required"
+            exit 1
+          fi
+        fi
+
+    - name: Setup cortexcli
+      shell: bash
+      run: |
+        echo "Installing cortexcli..."
+
+        # Set API credentials from inputs
+        CORTEX_API_KEY="${{ inputs.api-key }}"
+        CORTEX_API_KEY_ID="${{ inputs.api-key-id }}"
+        CORTEX_API_BASE_URL="${{ inputs.api-base-url }}"
+
+        # Validate required variables
+        if [[ -z "$CORTEX_API_BASE_URL" ]]; then
+          echo "Error: api-base-url is required"
+          exit 1
+        fi
+
+        # Determine OS and architecture
+        OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+        ARCH=$(uname -m)
+
+        case "$ARCH" in
+          x86_64) ARCH="amd64" ;;
+          aarch64|arm64) ARCH="arm64" ;;
+          *) echo "Unsupported architecture: $ARCH"; exit 1 ;;
+        esac
+
+        echo "Platform: ${OS}/${ARCH}"
+
+        # Extract hostname from api-base-url
+        # Input can be: https://api-tenant.xdr.us.paloaltonetworks.com
+        # or: https://api-tenant.xdr.us.paloaltonetworks.com/public_api/v1
+        API_HOST=$(echo "$CORTEX_API_BASE_URL" | sed -E 's|https?://([^/]+).*|\1|')
+
+        if [[ -z "$API_HOST" ]]; then
+          echo "Error: Could not extract API host from: $CORTEX_API_BASE_URL"
+          exit 1
+        fi
+
+        echo "API Host: $API_HOST"
+
+        # Use Cortex API to get signed download URL
+        DOWNLOAD_API="https://${API_HOST}/public_api/v1/unified-cli/releases/download-link?os=${OS}&architecture=${ARCH}"
+
+        echo "Requesting download link from Cortex API..."
+
+        # Get signed download URL
+        RESPONSE=$(curl -s "$DOWNLOAD_API" \
+          -H "x-xdr-auth-id: ${CORTEX_API_KEY_ID}" \
+          -H "Authorization: ${CORTEX_API_KEY}")
+
+        # Check if jq is available, otherwise use grep/sed
+        if command -v jq &> /dev/null; then
+          SIGNED_URL=$(echo "$RESPONSE" | jq -r '.signed_url')
+          FILE_NAME=$(echo "$RESPONSE" | jq -r '.file_name')
+        else
+          # Fallback to basic parsing
+          SIGNED_URL=$(echo "$RESPONSE" | grep -o '"signed_url":"[^"]*' | sed 's/"signed_url":"//')
+          FILE_NAME=$(echo "$RESPONSE" | grep -o '"file_name":"[^"]*' | sed 's/"file_name":"//')
+        fi
+
+        if [[ -z "$SIGNED_URL" || "$SIGNED_URL" == "null" ]]; then
+          echo "Error: Failed to get download URL from Cortex API"
+          echo "Response: $RESPONSE"
+          exit 1
+        fi
+
+        echo "Downloading: $FILE_NAME"
+
+        # Download to a temporary name to avoid conflicts
+        TEMP_FILE="cortexcli-download"
+        curl -L -o "$TEMP_FILE" "$SIGNED_URL"
+
+        # Check if file is a tarball or binary
+        if file "$TEMP_FILE" | grep -q "gzip compressed"; then
+          echo "Extracting tarball..."
+          tar -xzf "$TEMP_FILE"
+          rm -f "$TEMP_FILE"
+        elif file "$TEMP_FILE" | grep -qE "executable|ELF|Mach-O"; then
+          echo "Downloaded binary directly..."
+          mv "$TEMP_FILE" cortexcli
+        else
+          echo "File type:"
+          file "$TEMP_FILE"
+          echo "Error: Unknown file type downloaded"
+          exit 1
+        fi
+
+        # Make executable and install to system path
+        chmod +x cortexcli
+        sudo mv cortexcli /usr/local/bin/
+
+        # Verify installation
+        echo "Verifying installation..."
+        cortexcli --version
+
+        echo "cortexcli installed successfully"
+
+    - name: Run Cortex scan
+      id: scan
+      shell: bash
+      run: |
+        set +e  # Don't exit on error, we want to capture the exit code
+
+        # Export environment variables for cortexcli
+        export CORTEX_API_BASE_URL="${{ inputs.api-base-url }}"
+        export CORTEX_API_KEY="${{ inputs.api-key }}"
+        export CORTEX_API_KEY_ID="${{ inputs.api-key-id }}"
+        export CORTEX_UPLOAD_MODE="${{ inputs.upload-mode }}"
+        export CORTEX_SOFT_FAIL="${{ inputs.soft-fail }}"
+        export CORTEX_NO_FAIL_ON_CRASH="${{ inputs.no-fail-on-crash }}"
+
+        # Set proxy if provided
+        if [[ -n "${{ inputs.http-proxy }}" ]]; then
+          export HTTP_PROXY="${{ inputs.http-proxy }}"
+          export HTTPS_PROXY="${{ inputs.http-proxy }}"
+        fi
+
+        # Build base command with global flags
+        CMD="cortexcli"
+
+        # Add CA certificate if provided
+        if [[ -n "${{ inputs.ca-certificate }}" ]]; then
+          CMD="$CMD --ca-certificate ${{ inputs.ca-certificate }}"
+        fi
+
+        # Add no-cert-verify if enabled
+        if [[ "${{ inputs.no-cert-verify }}" == "true" ]]; then
+          CMD="$CMD --no-cert-verify"
+        fi
+
+        # Add log level
+        if [[ -n "${{ inputs.log-level }}" ]]; then
+          CMD="$CMD --log-level ${{ inputs.log-level }}"
+        fi
+
+        # Add support flag if enabled
+        if [[ "${{ inputs.support }}" == "true" ]]; then
+          CMD="$CMD --support"
+        fi
+
+        # Add soft-fail for code/image scans
+        if [[ "${{ inputs.scan-type }}" != "api" && "${{ inputs.soft-fail }}" == "true" ]]; then
+          CMD="$CMD --soft-fail"
+        fi
+
+        # Add no-fail-on-crash for code/image scans
+        if [[ "${{ inputs.scan-type }}" != "api" && "${{ inputs.no-fail-on-crash }}" == "true" ]]; then
+          CMD="$CMD --no-fail-on-crash"
+        fi
+
+        # Add upload-mode for code scans
+        if [[ "${{ inputs.scan-type }}" == "code" ]]; then
+          CMD="$CMD --upload-mode ${{ inputs.upload-mode }}"
+        fi
+
+        # Add severity filter for code scans
+        if [[ "${{ inputs.scan-type }}" == "code" && -n "${{ inputs.severity }}" ]]; then
+          CMD="$CMD --severity ${{ inputs.severity }}"
+        fi
+
+        # Build scan-specific command
+        case "${{ inputs.scan-type }}" in
+          code)
+            CMD="$CMD code scan"
+
+            # Required: directory or file
+            if [[ -n "${{ inputs.directory }}" ]]; then
+              CMD="$CMD --directory ${{ inputs.directory }}"
+            elif [[ -n "${{ inputs.file }}" ]]; then
+              CMD="$CMD --file ${{ inputs.file }}"
+            fi
+
+            # Optional parameters
+            [[ -n "${{ inputs.repo-id }}" ]] && CMD="$CMD --repo-id ${{ inputs.repo-id }}"
+            [[ -n "${{ inputs.branch }}" ]] && CMD="$CMD --branch ${{ inputs.branch }}"
+            [[ -n "${{ inputs.framework }}" ]] && CMD="$CMD --framework ${{ inputs.framework }}"
+            [[ -n "${{ inputs.skip-framework }}" ]] && CMD="$CMD --skip-framework ${{ inputs.skip-framework }}"
+            [[ -n "${{ inputs.output-format }}" ]] && CMD="$CMD --output ${{ inputs.output-format }}"
+            [[ -n "${{ inputs.output-file-path }}" ]] && CMD="$CMD --output-file-path ${{ inputs.output-file-path }}"
+            [[ "${{ inputs.compact }}" == "true" ]] && CMD="$CMD --compact"
+            [[ -n "${{ inputs.skip-path }}" ]] && CMD="$CMD --skip-path ${{ inputs.skip-path }}"
+            [[ "${{ inputs.create-repo-if-missing }}" == "true" ]] && CMD="$CMD --create-repo-if-missing"
+            [[ "${{ inputs.validate-secrets }}" == "true" ]] && CMD="$CMD --validate-secrets"
+            ;;
+
+          image)
+            CMD="$CMD image scan"
+
+            # Optional parameters (add these before the image name)
+            [[ -n "${{ inputs.docker-host }}" ]] && CMD="$CMD --docker-host ${{ inputs.docker-host }}"
+            [[ -n "${{ inputs.ci-pipeline-id }}" ]] && CMD="$CMD --ci-pipeline-id ${{ inputs.ci-pipeline-id }}"
+            [[ -n "${{ inputs.ci-build-id }}" ]] && CMD="$CMD --ci-build-id ${{ inputs.ci-build-id }}"
+            [[ -n "${{ inputs.image-timeout }}" ]] && CMD="$CMD --timeout ${{ inputs.image-timeout }}"
+            [[ -n "${{ inputs.image-output-format }}" ]] && CMD="$CMD --output-format ${{ inputs.image-output-format }}"
+
+            # Image name/archive (add at the end)
+            if [[ "${{ inputs.archive }}" == "true" ]]; then
+              [[ -n "${{ inputs.archive-format }}" ]] && CMD="$CMD --archive-format ${{ inputs.archive-format }}"
+              CMD="$CMD --archive ${{ inputs.image }}"
+            else
+              CMD="$CMD ${{ inputs.image }}"
+            fi
+            ;;
+
+          api)
+            CMD="$CMD api scan"
+
+            # Required parameters
+            CMD="$CMD --scanned-app-url ${{ inputs.scanned-app-url }}"
+            CMD="$CMD --api-spec-file ${{ inputs.api-spec-file }}"
+
+            # Optional parameters
+            [[ -n "${{ inputs.api-spec-type }}" ]] && CMD="$CMD --api-spec-type ${{ inputs.api-spec-type }}"
+            [[ -n "${{ inputs.auth-file }}" ]] && CMD="$CMD --auth-file ${{ inputs.auth-file }}"
+            [[ -n "${{ inputs.java-location }}" ]] && CMD="$CMD --java-location ${{ inputs.java-location }}"
+            [[ -n "${{ inputs.api-timeout }}" ]] && CMD="$CMD --timeout ${{ inputs.api-timeout }}"
+            [[ -n "${{ inputs.concurrency }}" ]] && CMD="$CMD --concurrency ${{ inputs.concurrency }}"
+            [[ -n "${{ inputs.api-output-file }}" ]] && CMD="$CMD --output-file ${{ inputs.api-output-file }}"
+            ;;
+        esac
+
+        echo "Executing: $CMD"
+        eval $CMD
+        EXIT_CODE=$?
+
+        echo "exit-code=$EXIT_CODE" >> $GITHUB_OUTPUT
+
+        # Set result file output if applicable
+        if [[ -n "${{ inputs.output-file-path }}" ]]; then
+          echo "result-file=${{ inputs.output-file-path }}" >> $GITHUB_OUTPUT
+        elif [[ -n "${{ inputs.api-output-file }}" ]]; then
+          echo "result-file=${{ inputs.api-output-file }}" >> $GITHUB_OUTPUT
+        fi
+
+        # Capture support logs if --support flag was used
+        if [[ "${{ inputs.support }}" == "true" ]]; then
+          echo "Capturing support logs..."
+
+          # The --support flag creates detailed log files in ~/.cortexcli/cortexcli-log/
+          # Look for the most recent log file
+          LOG_DIR="$HOME/.cortexcli/cortexcli-log"
+
+          if [[ -d "$LOG_DIR" ]]; then
+            # Find the most recent log file
+            LATEST_LOG=$(ls -t "$LOG_DIR"/cortexcli-*.log 2>/dev/null | head -1)
+
+            if [[ -n "$LATEST_LOG" && -f "$LATEST_LOG" ]]; then
+              # Create a support bundle with timestamp
+              TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+              BUNDLE_NAME="cortex-support-$TIMESTAMP.tar.gz"
+
+              # Create tarball containing all log files
+              tar -czf "$BUNDLE_NAME" -C "$LOG_DIR" .
+
+              echo "Support bundle created: $BUNDLE_NAME"
+              echo "  Contains log files from: $LOG_DIR"
+              echo "support-bundle=$BUNDLE_NAME" >> $GITHUB_OUTPUT
+            else
+              echo "Warning: No log files found in $LOG_DIR"
+              echo "support-bundle=" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "Warning: Log directory not found: $LOG_DIR"
+            echo "support-bundle=" >> $GITHUB_OUTPUT
+          fi
+        fi
+
+        exit $EXIT_CODE

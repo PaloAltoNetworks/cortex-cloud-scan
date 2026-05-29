@@ -1,0 +1,59 @@
+name: Code Security SARIF Scan
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  code-security-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Cortex Code Security Scan
+        uses: PaloAltoNetworks/cortex-cloud-scan@v1
+        with:
+          # Required inputs
+          scan-type: code
+          api-base-url: ${{ secrets.CORTEX_API_BASE_URL }}
+          api-key: ${{ secrets.CORTEX_API_KEY }}
+          api-key-id: ${{ secrets.CORTEX_API_KEY_ID }}
+
+          # Code scan options
+          directory: .
+          repo-id: ${{ github.repository }}
+          branch: ${{ github.ref_name }}
+          upload-mode: upload
+
+          # Scan configuration
+          framework: terraform,kubernetes,secrets,sca
+          severity: critical,high,medium
+
+          # Output configuration
+          output-format: sarif
+          output-file-path: cortex-results.sarif
+
+          # Pipeline behavior
+          soft-fail: false
+
+      - name: Upload SARIF to GitHub Security
+        uses: github/codeql-action/upload-sarif@v2
+        if: always()
+        with:
+          sarif_file: cortex-results.sarif
+          category: cortex-code-security
+
+      - name: Upload SARIF as artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cortex-sarif-results
+          path: cortex-results.sarif
+          retention-days: 30

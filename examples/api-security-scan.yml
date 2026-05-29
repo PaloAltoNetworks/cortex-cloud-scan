@@ -1,0 +1,87 @@
+name: API Security Scan
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'api/**'
+      - 'specs/**'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'api/**'
+      - 'specs/**'
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+jobs:
+  api-security-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Start API application
+        run: |
+          # Example: Start your API in the background
+          # docker-compose up -d api
+          # npm start &
+          # Wait for API to be ready
+          sleep 10
+
+      - name: Create authentication file
+        run: |
+          cat > auth.yaml << EOF
+          type: headers
+          creds:
+            name: Authorization
+            value: Bearer ${{ secrets.API_TEST_TOKEN }}
+          EOF
+
+      - name: Run Cortex API Security Scan
+        uses: PaloAltoNetworks/cortex-cloud-scan@v1
+        with:
+          # Required inputs
+          scan-type: api
+          api-base-url: ${{ secrets.CORTEX_API_BASE_URL }}
+          api-key: ${{ secrets.CORTEX_API_KEY }}
+          api-key-id: ${{ secrets.CORTEX_API_KEY_ID }}
+
+          # API scan options
+          scanned-app-url: http://localhost:8080
+          api-spec-file: ./specs/openapi.yaml
+          api-spec-type: openapi
+
+          # Authentication
+          auth-file: ./auth.yaml
+
+          # Scan configuration
+          api-timeout: 600
+          concurrency: 10
+
+          # Output configuration
+          api-output-file: api-scan-results.json
+
+      - name: Upload scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-security-results
+          path: api-scan-results.json
+          retention-days: 30
+
+      - name: Stop API application
+        if: always()
+        run: |
+          # Clean up running services
+          # docker-compose down
+          # pkill -f "npm start"
+          echo "Cleanup complete"

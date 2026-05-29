@@ -1,0 +1,47 @@
+name: Container Scan with Support Bundle
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  scan-with-diagnostics:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t myapp:${{ github.sha }} .
+
+      - name: Scan container with support bundle
+        id: scan
+        uses: PaloAltoNetworks/cortex-cloud-scan@v1
+        continue-on-error: true  # Continue even if scan fails
+        with:
+          scan-type: image
+          api-base-url: ${{ secrets.CORTEX_API_BASE_URL }}
+          api-key: ${{ secrets.CORTEX_API_KEY }}
+          api-key-id: ${{ secrets.CORTEX_API_KEY_ID }}
+          image: myapp:${{ github.sha }}
+          image-timeout: 300
+          support: true  # ← Generate support bundle
+
+      - name: Upload support bundle
+        uses: actions/upload-artifact@v4
+        if: always() && steps.scan.outputs.support-bundle != ''  # Only if bundle exists
+        with:
+          name: cortex-support-bundle
+          path: ${{ steps.scan.outputs.support-bundle }}
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Check scan result
+        if: steps.scan.outputs.exit-code != '0'
+        run: |
+          echo "Scan failed with exit code: ${{ steps.scan.outputs.exit-code }}"
+          echo "Support bundle available in artifacts for troubleshooting"
+          exit 1

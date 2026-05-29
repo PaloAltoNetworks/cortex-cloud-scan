@@ -1,0 +1,117 @@
+name: Validate Action
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - feat-*
+
+jobs:
+  validate-action:
+    name: Validate action.yml
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Validate action metadata
+        run: |
+          echo "Validating action.yml..."
+
+          # Check if action.yml exists
+          if [ ! -f action.yml ]; then
+            echo "Error: action.yml not found"
+            exit 1
+          fi
+
+          # Check for required fields using yq or basic grep
+          for field in name description author; do
+            if ! grep -q "^${field}:" action.yml; then
+              echo "Error: Required field '${field}' not found in action.yml"
+              exit 1
+            fi
+          done
+
+          echo "✓ action.yml is valid"
+
+      - name: Check for branding
+        run: |
+          if grep -q "branding:" action.yml; then
+            echo "✓ Branding metadata found (required for Marketplace)"
+          else
+            echo "Warning: No branding metadata found"
+          fi
+
+      - name: Validate examples
+        run: |
+          echo "Checking example workflows..."
+
+          for file in examples/*.yml; do
+            if [ -f "$file" ]; then
+              echo "Checking $file..."
+              # Basic YAML syntax check
+              if ! grep -q "^name:" "$file"; then
+                echo "Warning: $file missing 'name' field"
+              fi
+              if ! grep -q "^on:" "$file"; then
+                echo "Warning: $file missing 'on' trigger"
+              fi
+            fi
+          done
+
+          echo "✓ Example workflows checked"
+
+      - name: Check documentation
+        run: |
+          echo "Checking required documentation files..."
+
+          required_files=("README.md" "LICENSE" "QUICKSTART.md" "CHANGELOG.md")
+
+          for file in "${required_files[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✓ $file exists"
+            else
+              echo "Error: Required file $file is missing"
+              exit 1
+            fi
+          done
+
+  test-code-scan:
+    name: Test Code Security Scan
+    runs-on: ubuntu-latest
+    # Only run if we have secrets configured
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Test local action (code scan)
+        uses: ./
+        continue-on-error: true
+        with:
+          scan-type: code
+          api-base-url: ${{ secrets.CORTEX_API_BASE_URL }}
+          api-key: ${{ secrets.CORTEX_API_KEY }}
+          api-key-id: ${{ secrets.CORTEX_API_KEY_ID }}
+          directory: .
+          upload-mode: no-upload
+          soft-fail: true
+
+  markdown-lint:
+    name: Lint Markdown
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run markdownlint
+        uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: |
+            **/*.md
+            !node_modules
+        continue-on-error: true

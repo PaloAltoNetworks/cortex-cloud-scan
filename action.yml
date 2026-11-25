@@ -360,11 +360,6 @@ runs:
           CMD="$CMD --upload-mode ${{ inputs.upload-mode }}"
         fi
 
-        # Add severity filter for code scans
-        if [[ "${{ inputs.scan-type }}" == "code" && -n "${{ inputs.severity }}" ]]; then
-          CMD="$CMD --severity ${{ inputs.severity }}"
-        fi
-
         # Build scan-specific command
         case "${{ inputs.scan-type }}" in
           code)
@@ -388,6 +383,7 @@ runs:
             [[ -n "${{ inputs.skip-path }}" ]] && CMD="$CMD --skip-path ${{ inputs.skip-path }}"
             [[ "${{ inputs.create-repo-if-missing }}" == "true" ]] && CMD="$CMD --create-repo-if-missing"
             [[ "${{ inputs.validate-secrets }}" == "true" ]] && CMD="$CMD --validate-secrets"
+            [[ -n "${{ inputs.severity }}" ]] && CMD="$CMD --severity ${{ inputs.severity }}"
             ;;
 
           image)

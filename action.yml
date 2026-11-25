@@ -368,7 +368,7 @@ runs:
         # Build scan-specific command
         case "${{ inputs.scan-type }}" in
           code)
-            CMD="$CMD code scan"
+            CMD="$CMD code scan --source GITHUB_ACTIONS"
 
             # Required: directory or file
             if [[ -n "${{ inputs.directory }}" ]]; then
